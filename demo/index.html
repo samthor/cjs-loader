@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<script type="module">
+
+import base64 from './wrap_base64.js';
+console.info('loaded base64', base64);
+
+encoded.textContent = base64.encode('Check console for demo.');
+decoded.textContent = base64.decode(encoded.textContent);
+
+</script>
+
+</head>
+<body>
+
+<p id="decoded">Check console for demo.</p>
+
+<pre id="encoded"></pre>
+
+</body>
+</html>
