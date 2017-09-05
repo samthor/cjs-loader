@@ -3,11 +3,12 @@ cjs-faker fakes commonJS boilerplate to allow importing legacy code as an ES6 mo
 This is implemented by providing fake `exports`/`module.exports` and `require()` calls that are used by the commonJS code being included.
 You must shim all commonJS modules that you depend on.
 
-# Caveat
+# Rationale
 
-This approach is mostly a thought experiment in evaluating commonJS code at runtime, rather than requiring a build step.
+This approach is mostly a thought experiment in evaluating commonJS code at runtime, rather than requiring a build step (as `require()` is not supported natively by browsers).
+
 For most practical purposes, you'll be better off using Rollup with [its commonJS plugin](https://github.com/rollup/rollup-plugin-commonjs).
-This requires a build step before you can import code, but generates less boilerplate and doesn't require a shim per module in the dependency tree.
+Using Rollup requires a build step before you can import legacy code as an ES6 module, but doesn't require a shim per module in the dependency tree.
 
 # Usage
 
