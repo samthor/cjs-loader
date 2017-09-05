@@ -1,0 +1,9 @@
+{
+  "name": "cjs-faker",
+  "version": "0.1.0",
+  "description": "Fakes commonJS boilerplate to allow importing legacy code as an ES6 module",
+  "main": "cjs-faker.js",
+  "repository": "https://github.com/samthor/cjs-faker.git",
+  "author": "Sam Thorogood <sam.thorogood@gmail.com>",
+  "license": "Apache-2"
+}
