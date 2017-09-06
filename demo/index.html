@@ -10,6 +10,9 @@ console.info('loaded base64', base64);
 encoded.textContent = base64.encode('Check console for demo.');
 decoded.textContent = base64.decode(encoded.textContent);
 
+const b64 = require('base64');
+console.info('require also works', b64);
+
 </script>
 
 </head>
