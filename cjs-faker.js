@@ -200,11 +200,11 @@ function getter(id = undefined) {
   }
 
   if (id === undefined || typeof id !== 'string') {
-    if (expectedID === undefined) {
+    if (!expectedID) {  // look for null/undefined
       throw new TypeError(`cjs-faker can\'t register module without ID`);
     }
     id = expectedID;
-  } else if (expectedID !== undefined && id !== expectedID) {
+  } else if (expectedID && id !== expectedID) {
     throw new TypeError(`cjs-faker got ID mismatch: define was ${expectedID}, passed ${id}`)
   }
 
