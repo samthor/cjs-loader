@@ -36,20 +36,20 @@ if (!g) {
   throw new TypeError('');
 }
 
-let exports = undefined;
-let expectedID = undefined;
+let globalExports = undefined;
+let defined = undefined;
 
 Object.defineProperty(g, 'exports', {
   get() {
     // we were fetched, great
-    if (exports === undefined) {
-      exports = {};
+    if (globalExports === undefined) {
+      globalExports = {};
     }
-    return exports;
+    return globalExports;
   },
   set(v) {
     // we were set, that's also fine, implicitly clears undefined
-    exports = v;
+    globalExports = v;
   },
 })
 
@@ -80,39 +80,42 @@ function argNames(fn) {
   return args;
 }
 
-/**
- * @type {!Object<string, *>}
- */
-const registry = {
-  'require': null,  // nb: we fill this in at the end of file
-  'module': g.module,
-};
+class CacheEntry {
+  constructor(value) {
+    if (value instanceof Promise) {
+      this.value = null;
+      value.then((out) => this.value = out);
+    } else {
+      this.value = value;
+    }
+  }
+
+  resolve(value) {
+    
+  }
+}
 
 /**
- * @return {*} the this object
+ * @type {!Object<string, {p: !Promise<*>, r: function(*)}>}
  */
-function globalForModule() {
-  if (typeof window === 'object') {
-    return window;
-  } else if (typeof global === 'object') {
-    return global;
-  }
-  return this;  // probably undefined
-}
+const cache = {
+  'require': null,  // nb: we fill this in at the end of file
+  'module': {p: Promise.resolve(g.module)},
+};
 
 /**
  * @param {string} id
  * @return {*} literally anything exported
  */
 function require(id) {
-  const exports = registry[id];
+  const exports = cache[id];
   if (exports === undefined) {
     throw new TypeError(`require() can't resolve: ${id}`);
   }
   return exports;
 }
 
-registry['require'] = require;
+cache['require'] = {p: Promise.resolve(require)};
 
 /**
  * @param {...(string|!Array<string>|!Function)} args
@@ -132,10 +135,9 @@ function define(...args) {
   const fn = args.shift();
 
   // prevent duplicate define()
-  if (expectedID !== undefined) {
+  if (defined !== undefined) {
     throw new Error('cjs-faker had define() called multiple times')
   }
-  expectedID = id;
 
   // create default deps
   if (deps === null) {
@@ -152,35 +154,8 @@ function define(...args) {
     }
   }
 
-  // resolve dependencies
-  let passedExports = null;
-  const passed = deps.map((dep) => {
-    if (dep === 'exports') {
-      passedExports = passedExports || {};
-      return passedExports;
-    } else if (!(dep in registry)) {
-      throw new TypeError(`AMD can't resolve: ${dep}`);
-    }
-    return registry[dep];
-  });
-
-  // call the AMD loader
-  const t = globalForModule();
-  const localExports = fn.apply(t, passed);
-
-  // favour passedExports if exports has no values
-  // see: https://github.com/requirejs/requirejs/blob/master/require.js#L886
-  let exportsHasValues = false;
-  for (let k in exports) {
-    exportsHasValues = true;
-    break;
-  }
-  if (!exportsHasValues) {
-    exports = undefined;
-  }
-  exports = localExports || exports || passedExports || {};
-
-  // nb. define() doesn't return anything
+  // store for later
+  defined = {id, deps, fn};
 }
 
 /**
@@ -191,36 +166,107 @@ function define(...args) {
 define.amd = {jQuery: true};
 
 /**
- * @param {string=} id
+ * @param {string} id to convert to URL
+ * @return {URL} null if unresolvable
+ */
+function idToURL(id) {
+  try {
+    return new URL(id);  // absolute
+  } catch (e) {
+    // ok
+  }
+  if (id.startsWith('./')) {
+    return new URL(id, window.location);
+  }
+  return null;  // magic URL
+}
+
+export async function load(id) {
+  if (id in cache) {
+    return cache[id].p;
+  }
+
+  const url = idToURL(id);
+  if (!url) {
+    // TODO
+    throw new Error('TODO node_modules magic foo: ' + id);
+  }
+
+  const entry = {};
+  cache[id] = entry;
+
+  // TODO: x-origin/credentials stuff
+  // FIXME: path to cjs-faker??
+  // FIXME: escape url, id
+  const script = document.createElement('script');
+  script.type = 'module';
+  script.textContent = `
+import faker from '../cjs-faker.js';
+import '${url}';
+faker('${id}');
+  `;
+  document.head.appendChild(script);
+  script.remove();
+
+  return entry.p = new Promise((resolve, reject) => {
+    entry.r = resolve;
+    script.onerror = reject;
+  });
+}
+
+/**
+ * @param {!Object} object
+ * @return {Object}
+ */
+function withKeys(object) {
+  for (let k in object) {
+    return object;
+  }
+  return null;
+}
+
+/**
+ * @param {string} id
  * @return {*} literally anything exported
  */
-function getter(id = undefined) {
-  if (exports === undefined) {
-    throw new TypeError('cjs-faker found no exported module');
+function faker(id) {
+  const entry = cache[id];
+
+  if (defined === undefined) {
+    console.debug('requireJS module', id, 'resolving with', exports);
+    entry.r(globalExports);
+    globalExports = undefined;  // clear
+    return;
   }
 
-  if (id === undefined || typeof id !== 'string') {
-    if (!expectedID) {  // look for null/undefined
-      throw new TypeError(`cjs-faker can\'t register module without ID`);
-    }
-    id = expectedID;
-  } else if (expectedID && id !== expectedID) {
-    throw new TypeError(`cjs-faker got ID mismatch: define was ${expectedID}, passed ${id}`)
-  }
+  console.debug('AMD module', id, 'with pending deps', defined.deps);
 
-  if (id === 'exports') {
-    throw new TypeError(`cjs-faker can't export 'exports'`);
-  } else if (id in registry) {
-    throw new TypeError(`cjs-faker already registered: ${id}`);
-  }
+  // TODO: check id vs defined
+  const local = defined;
+  const heldExports = globalExports;  // in case the AMD module mucked with them before running
+  defined = undefined;
+  globalExports = undefined;
 
-  registry[id] = exports;
-  exports = undefined;  // clear
-  expectedID = undefined;
-  return registry[id];
+  // resolve dependencies
+  const passedExports = {};
+  const passed = local.deps.map((dep) => {
+    return dep === 'exports' ? passedExports : load(dep);
+  });
+  const p = Promise.all(passed).then((all) => {
+    // performs exports dance, see requireJS for some guidance:
+    // https://github.com/requirejs/requirejs/blob/master/require.js#L886
+    globalExports = heldExports;
+    const returnedExports = local.fn.apply(g, all);
+    const localExports = withKeys(exports);  // if global exports has no keys, assume unused
+    globalExports = undefined;
+    return returnedExports || localExports || passedExports;
+  });
+
+  entry.r(p);
+  // nb. define() doesn't return anything
 }
 
 g.define = define;
 g.require = require;
 
-export default getter;
+export default faker;
