@@ -12,16 +12,9 @@ load('./foo.js').then((foo) => {
 load('./base64.js').then((base64) => {
   console.info('got base64 in Promise', base64);
 });
-
-//
-// import base64 from './wrap_base64.js';
-// console.info('loaded base64', base64);
-//
-// encoded.textContent = base64.encode('Check console for demo.');
-// decoded.textContent = base64.decode(encoded.textContent);
-//
-// const b64 = require('base64');
-// console.info('require also works', b64);
+load('handlebars').then((x) => {
+  console.info('handlebars', x);
+});
 
 </script>
 

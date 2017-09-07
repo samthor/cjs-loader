@@ -33,9 +33,10 @@
 
 const g = (typeof window === 'object' ? window : (typeof global === 'object' ? global : null));
 if (!g) {
-  throw new TypeError('');
+  throw new TypeError(`cjs-faker can't choose global object`);
 }
 
+let globalScope = undefined;
 let globalExports = undefined;
 let defined = undefined;
 
@@ -81,17 +82,26 @@ function argNames(fn) {
 }
 
 class CacheEntry {
-  constructor(value) {
-    if (value instanceof Promise) {
-      this.value = null;
-      value.then((out) => this.value = out);
-    } else {
-      this.value = value;
-    }
-  }
+  /**
+   * @param {*=} value
+   */
+  constructor(value = undefined) {
+    this.value = value;
+    this.done = null;
 
-  resolve(value) {
-    
+    if (value === undefined) {
+      this.p = new Promise((resolve, reject) => {
+        this.done = (v) => {
+          v instanceof Error ? reject(v) : resolve(v);
+          console.info('resolved cache', v);
+          this.done = null;
+        };
+      });
+      this.p.then((v) => this.value = v);
+      this.p.catch((err) => this.value = err);
+    } else {
+      this.p = Promise.resolve(value);
+    }
   }
 }
 
@@ -99,23 +109,64 @@ class CacheEntry {
  * @type {!Object<string, {p: !Promise<*>, r: function(*)}>}
  */
 const cache = {
-  'require': null,  // nb: we fill this in at the end of file
-  'module': {p: Promise.resolve(g.module)},
+  'require': new CacheEntry(require),
+  'module': new CacheEntry(g.module),
 };
+
+/**
+ * @type {!Object<string, string>}
+ */
+const paths = {};
+
+/**
+ * @param {string}
+ * @return {boolean}
+ */
+function isRelative(id) {
+  return id.startsWith('./') || id.startsWith('../');
+}
+
+function resolvePath(id) {
+  const url = idToURL(id);
+  if (!url) {
+    // TODO: this resolve async-ish
+    return 'node_modules/';
+  }
+
+}
 
 /**
  * @param {string} id
  * @return {*} literally anything exported
  */
 function require(id) {
-  const exports = cache[id];
-  if (exports === undefined) {
-    throw new TypeError(`require() can't resolve: ${id}`);
-  }
-  return exports;
-}
+  console.debug('require being invoked', id, 'got scope', globalScope);
 
-cache['require'] = {p: Promise.resolve(require)};
+  let path = paths[globalScope] || globalScope;
+  if (isRelative(id)) {
+    const prefix = 'http://x/';
+    const u = new URL(id, prefix + path);
+    path = u.href.substr(prefix.length);
+
+    if (path.lastIndexOf('.') <= path.lastIndexOf('/')) {
+      path += '.js';
+    }
+  } else {
+    throw new TypeError('FIXME: support node_modules dep on other node_modules')
+  }
+
+  console.info('real path', path);
+
+  const entry = cache[id];
+  if (entry === undefined) {
+    throw new TypeError(`require() can't resolve: ${id}`);
+  } else if (entry.value === undefined) {
+    throw new TypeError(`require() module not ready: ${id}`);
+  } else if (entry.value instanceof Error) {
+    throw entry.value;
+  }
+  return entry.value;
+}
 
 /**
  * @param {...(string|!Array<string>|!Function)} args
@@ -136,6 +187,7 @@ function define(...args) {
 
   // prevent duplicate define()
   if (defined !== undefined) {
+    // TODO: this could be supported (although we only know 'requester' ID)
     throw new Error('cjs-faker had define() called multiple times')
   }
 
@@ -175,10 +227,24 @@ function idToURL(id) {
   } catch (e) {
     // ok
   }
-  if (id.startsWith('./')) {
+  if (id.startsWith('./') || id.startsWith('../')) {
     return new URL(id, window.location);
   }
   return null;  // magic URL
+}
+
+/**
+ * @param {string} content
+ * @return {!HTMLScriptElement}
+ */
+function insertOrderedScript(content) {
+  const s = document.createElement('script');
+  s.type = 'module';
+  s.async = false;
+  s.textContent = content;
+  document.head.appendChild(s);
+  s.remove();
+  return s;
 }
 
 export async function load(id) {
@@ -186,32 +252,52 @@ export async function load(id) {
     return cache[id].p;
   }
 
-  const url = idToURL(id);
+  let url = idToURL(id);
   if (!url) {
-    // TODO
-    throw new Error('TODO node_modules magic foo: ' + id);
+    // TODO: x-origin/credentials stuff
+    const request = await g.fetch(`node_modules/${id}/package.json`);
+    const json = await request.json();
+
+    // TODO: use 'jsnext:main'
+    const path = json['main'];
+    if (path === undefined) {
+      throw new TypeError('cjs-faker can\'t read main for: ' + id);
+    }
+
+    paths[id] = `node_modules/${id}/${path}`;
+    url = new URL(`node_modules/${id}/${path}`, window.location);
   }
 
-  const entry = {};
-  cache[id] = entry;
-
-  // TODO: x-origin/credentials stuff
   // FIXME: path to cjs-faker??
   // FIXME: escape url, id
-  const script = document.createElement('script');
-  script.type = 'module';
-  script.textContent = `
+
+  // insert early script to setup scope
+  insertOrderedScript(`
+import {scope} from '../cjs-faker.js';
+scope('${id}');
+  `);
+  // TODO: we can use above to create/teardown globals
+
+  // insert actual script
+  const script = insertOrderedScript(`
 import faker from '../cjs-faker.js';
 import '${url}';
 faker('${id}');
-  `;
-  document.head.appendChild(script);
-  script.remove();
+  `);
 
-  return entry.p = new Promise((resolve, reject) => {
-    entry.r = resolve;
-    script.onerror = reject;
-  });
+  const entry = new CacheEntry();
+  script.onerror = entry.done;
+  cache[id] = entry;
+  return entry.p;
+}
+
+/**
+ * Store the current execution scope until a call to faker.
+ *
+ * @param {string} id
+ */
+export function scope(id) {
+  globalScope = id;
 }
 
 /**
@@ -230,16 +316,14 @@ function withKeys(object) {
  * @return {*} literally anything exported
  */
 function faker(id) {
+  globalScope = undefined;
   const entry = cache[id];
 
   if (defined === undefined) {
-    console.debug('requireJS module', id, 'resolving with', exports);
-    entry.r(globalExports);
+    entry.done(globalExports);
     globalExports = undefined;  // clear
     return;
   }
-
-  console.debug('AMD module', id, 'with pending deps', defined.deps);
 
   // TODO: check id vs defined
   const local = defined;
@@ -252,7 +336,7 @@ function faker(id) {
   const passed = local.deps.map((dep) => {
     return dep === 'exports' ? passedExports : load(dep);
   });
-  const p = Promise.all(passed).then((all) => {
+  entry.done(Promise.all(passed).then((all) => {
     // performs exports dance, see requireJS for some guidance:
     // https://github.com/requirejs/requirejs/blob/master/require.js#L886
     globalExports = heldExports;
@@ -260,9 +344,8 @@ function faker(id) {
     const localExports = withKeys(exports);  // if global exports has no keys, assume unused
     globalExports = undefined;
     return returnedExports || localExports || passedExports;
-  });
+  }));
 
-  entry.r(p);
   // nb. define() doesn't return anything
 }
 
