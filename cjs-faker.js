@@ -15,32 +15,27 @@
  */
 
 /**
- * @fileoverview Fakes commonJS and AMD boilerplate to allow importing legacy code via ES6 modules.
+ * @fileoverview Transitively includes commonJS modules for use on the web.
  *
- * Implemented by providing fake exports/module.exports, require() and define() calls that are used
- * by the code being included. Use this library by providing a shim wrapping file per-library:
- *
- *    import faker from './require-faker.js';
- *    import './path/to/commonjs/module.js';
- *    export default faker('moduleid');
- *
- * This shim file will now provide the exported code (via module.exports or define()) as the
- * default ES6 module export. If your legacy code requires other modules via require() or as deps
- * arguments to define(), then it's your responsibility to shim those files _first_.
- *
- * Not really intended for production (unless you use Rollup), more of a thought experiment.
+ * This is a successful but terrible idea and should not be used by anyone.
  */
 
-const g = (typeof window === 'object' ? window : (typeof global === 'object' ? global : null));
-if (!g) {
-  throw new TypeError(`cjs-faker can't choose global object`);
-}
+import * as utils from './utils.js';
 
-let globalScope = undefined;
+const config = {
+  global: window,
+  location: window.location.href,  // take initial copy
+  modules: 'node_modules',
+};
+
+config.global.define = define;
+config.global.require = require;
+
+let state = undefined;
 let globalExports = undefined;
 let defined = undefined;
 
-Object.defineProperty(g, 'exports', {
+Object.defineProperty(config.global, 'exports', {
   get() {
     // we were fetched, great
     if (globalExports === undefined) {
@@ -54,32 +49,14 @@ Object.defineProperty(g, 'exports', {
   },
 })
 
-g.module = {
+config.global.module = {
   get exports() {
-    return g.exports;
+    return config.global.exports;
   },
   set exports(v) {
-    g.exports = v;
+    config.global.exports = v;
   },
 };
-
-const functionMatch = /^function\s*\w*\(([\w\s,]+)\) {/;
-
-/**
- * @param {!Function} fn
- * @return {!Array<string>} array of simple arg names (no =, ... etc)
- */
-function argNames(fn) {
-  const match = functionMatch.exec(fn.toString());
-  if (!match) {
-    return [];
-  }
-  const args = match[1].split(',').map((x) => x.trim());
-  if (args.length && args[args.length - 1] === '') {
-    args.pop();
-  }
-  return args;
-}
 
 class CacheEntry {
   /**
@@ -93,7 +70,6 @@ class CacheEntry {
       this.p = new Promise((resolve, reject) => {
         this.done = (v) => {
           v instanceof Error ? reject(v) : resolve(v);
-          console.info('resolved cache', v);
           this.done = null;
         };
       });
@@ -106,60 +82,46 @@ class CacheEntry {
 }
 
 /**
- * @type {!Object<string, {p: !Promise<*>, r: function(*)}>}
+ * @type {!Object<string, !CacheEntry>}
  */
 const cache = {
   'require': new CacheEntry(require),
-  'module': new CacheEntry(g.module),
+  'module': new CacheEntry(config.global.module),
 };
 
-/**
- * @type {!Object<string, string>}
- */
-const paths = {};
-
-/**
- * @param {string}
- * @return {boolean}
- */
-function isRelative(id) {
-  return id.startsWith('./') || id.startsWith('../');
-}
-
-function resolvePath(id) {
-  const url = idToURL(id);
-  if (!url) {
-    // TODO: this resolve async-ish
-    return 'node_modules/';
+class FakeRequireError {
+  constructor(state, required) {
+    this.state = state;
+    this.required = required;
   }
-
 }
+window.addEventListener('error', (ev) => {
+  const e = ev.error;
+  if (!(e instanceof FakeRequireError)) { return; }
+
+  ev.preventDefault();
+  ev.stopPropagation();
+
+  // load the module that was require()'d, and then reload the thing it depended on
+  load(e.required).then(() => {
+    reload(e.state.id, e.state.url);
+  });
+});
 
 /**
  * @param {string} id
  * @return {*} literally anything exported
  */
 function require(id) {
-  console.debug('require being invoked', id, 'got scope', globalScope);
-
-  let path = paths[globalScope] || globalScope;
-  if (isRelative(id)) {
-    const prefix = 'http://x/';
-    const u = new URL(id, prefix + path);
-    path = u.href.substr(prefix.length);
-
-    if (path.lastIndexOf('.') <= path.lastIndexOf('/')) {
-      path += '.js';
-    }
-  } else {
-    throw new TypeError('FIXME: support node_modules dep on other node_modules')
+  let url = resolvePath(id);
+  if (url !== null) {
+    id = url;
   }
-
-  console.info('real path', path);
 
   const entry = cache[id];
   if (entry === undefined) {
-    throw new TypeError(`require() can't resolve: ${id}`);
+    // TODO: don't throw immediately, get as many require() calls as possible
+    throw new FakeRequireError(state, id);
   } else if (entry.value === undefined) {
     throw new TypeError(`require() module not ready: ${id}`);
   } else if (entry.value instanceof Error) {
@@ -172,42 +134,11 @@ function require(id) {
  * @param {...(string|!Array<string>|!Function)} args
  */
 function define(...args) {
-  let id = null, deps = null;
-
-  if (typeof args[0] === 'string') {
-    id = args.shift();
-  }
-  if (typeof args[0] === 'object' && 'length' in args[0]) {
-    deps = args.shift();
-  }
-  if (args.length !== 1 || typeof args[0] !== 'function') {
-    throw new Error('cjs-faker define got unexpected args: wanted [id,][deps,]func');
-  }
-  const fn = args.shift();
-
-  // prevent duplicate define()
   if (defined !== undefined) {
     // TODO: this could be supported (although we only know 'requester' ID)
     throw new Error('cjs-faker had define() called multiple times')
   }
-
-  // create default deps
-  if (deps === null) {
-    if (fn.length) {
-      // look for 'Simplified CommonJS Wrapper'
-      deps = argNames(fn);
-      const s = deps.join(', ');
-      if (s !== 'require' && s !== 'require, exports, module') {
-        throw new Error('cjs-faker defined method expected args: ' +
-            `'require' or 'require, exports, module', was: ${s}`);
-      }
-    } else {
-      deps = [];
-    }
-  }
-
-  // store for later
-  defined = {id, deps, fn};
+  defined = utils.argsForDefine(args);  // store for later
 }
 
 /**
@@ -217,98 +148,110 @@ function define(...args) {
  */
 define.amd = {jQuery: true};
 
-/**
- * @param {string} id to convert to URL
- * @return {URL} null if unresolvable
- */
-function idToURL(id) {
-  try {
-    return new URL(id);  // absolute
-  } catch (e) {
-    // ok
-  }
-  if (id.startsWith('./') || id.startsWith('../')) {
-    return new URL(id, window.location);
-  }
-  return null;  // magic URL
-}
-
-/**
- * @param {string} content
- * @return {!HTMLScriptElement}
- */
-function insertOrderedScript(content) {
-  const s = document.createElement('script');
-  s.type = 'module';
-  s.async = false;
-  s.textContent = content;
-  document.head.appendChild(s);
-  s.remove();
-  return s;
-}
-
 export async function load(id) {
+  let url = resolvePath(id);
+  if (url === null) {
+    // this is actually a node module, fetch package.json
+    const request = await config.global.fetch(`./${config.modules}/${id}/package.json`);
+    const json = await request.json();
+    const cand = `./${config.modules}/${id}/${(json['main'] || 'index.js')}`;
+    url = resolvePath(cand);
+  } else {
+    id = url;  // absolute fetch uses URL as id
+  }
+
   if (id in cache) {
     return cache[id].p;
   }
+  const entry = new CacheEntry();
+  cache[id] = entry;
 
-  let url = idToURL(id);
-  if (!url) {
-    // TODO: x-origin/credentials stuff
-    const request = await g.fetch(`node_modules/${id}/package.json`);
-    const json = await request.json();
+  reload(id, url);
 
-    // TODO: use 'jsnext:main'
-    const path = json['main'];
-    if (path === undefined) {
-      throw new TypeError('cjs-faker can\'t read main for: ' + id);
-    }
+  return entry.p;
+}
 
-    paths[id] = `node_modules/${id}/${path}`;
-    url = new URL(`node_modules/${id}/${path}`, window.location);
-  }
+let scriptCount = 0;  // used to force rerun, but _not_ reload
 
-  // FIXME: path to cjs-faker??
-  // FIXME: escape url, id
+function reload(id, url) {
+  // FIXME: config path to cjs-faker
+  const escapedUrl = url.replace(/'/g, '\\\'');
+  const escapedID = id.replace(/'/g, '\\\'');
 
   // insert early script to setup scope
-  insertOrderedScript(`
-import {scope} from '../cjs-faker.js';
-scope('${id}');
+  utils.insertModuleScript(`
+import {setup} from '../cjs-faker.js';
+setup('${escapedID}', '${escapedUrl}');
   `);
   // TODO: we can use above to create/teardown globals
 
   // insert actual script
-  const script = insertOrderedScript(`
+  const script = utils.insertModuleScript(`
 import faker from '../cjs-faker.js';
-import '${url}';
-faker('${id}');
+import '${escapedUrl}#${++scriptCount}';
+faker('${escapedID}');
   `);
-
-  const entry = new CacheEntry();
-  script.onerror = entry.done;
-  cache[id] = entry;
-  return entry.p;
+  script.onerror = cache[id].done;  // only for network/other errors
 }
 
 /**
- * Store the current execution scope until a call to faker.
+ * @param {string} id
+ * @return {string}
+ */
+function resolvePath(id) {
+  try {
+    // look for http://.. or similar
+    const absolute = new URL(id);
+    return absolute.location;
+  } catch (e) {
+    // nothing, this is fine
+  }
+
+  if (!id.includes('/')) {
+    return null;  // module
+  }
+
+  let pathname;
+  const leadingPart = id.split('/', 1)[0];
+  switch (leadingPart) {
+  case '':
+    pathname = id;
+    break;
+
+  case '.':
+  case '..':
+    if (state) {
+      // remove last component
+      const dirname = state.url.substr(0, state.url.lastIndexOf('/'));
+      pathname = `${dirname}/${id}`;
+    } else {
+      pathname = `${config.location}/${id}`;
+    }
+    break;
+
+  default:
+    pathname = `${config.location}/${config.modules}/${id}`;
+  }
+
+  // poor man's normalize
+  const u = new URL(pathname, config.location);
+  pathname = u.pathname.replace(/\/+/g, '/');
+
+  // FIXME: ugly hack to assume .js, needed for Handlebars, will break .json loading
+  if (!pathname.endsWith('.js')) {
+    pathname += '.js';
+  }
+  return pathname;
+}
+
+/**
+ * Store the current execution path until a call to faker.
  *
  * @param {string} id
+ * @param {string} url
  */
-export function scope(id) {
-  globalScope = id;
-}
-
-/**
- * @param {!Object} object
- * @return {Object}
- */
-function withKeys(object) {
-  for (let k in object) {
-    return object;
-  }
-  return null;
+export function setup(id, url) {
+  state = {id, url};
 }
 
 /**
@@ -316,7 +259,10 @@ function withKeys(object) {
  * @return {*} literally anything exported
  */
 function faker(id) {
-  globalScope = undefined;
+  if (state.id !== id) {
+    throw new Error(`invalid state.id=${state.id} id=${id}`);
+  }
+  state = undefined;
   const entry = cache[id];
 
   if (defined === undefined) {
@@ -325,7 +271,7 @@ function faker(id) {
     return;
   }
 
-  // TODO: check id vs defined
+  // TODO: check id vs defined for AMD
   const local = defined;
   const heldExports = globalExports;  // in case the AMD module mucked with them before running
   defined = undefined;
@@ -340,16 +286,11 @@ function faker(id) {
     // performs exports dance, see requireJS for some guidance:
     // https://github.com/requirejs/requirejs/blob/master/require.js#L886
     globalExports = heldExports;
-    const returnedExports = local.fn.apply(g, all);
-    const localExports = withKeys(exports);  // if global exports has no keys, assume unused
+    const returnedExports = local.fn.apply(config.global, all);
+    const localExports = utils.withKeys(exports);  // if global exports has no keys, assume unused
     globalExports = undefined;
     return returnedExports || localExports || passedExports;
   }));
-
-  // nb. define() doesn't return anything
 }
-
-g.define = define;
-g.require = require;
 
 export default faker;
