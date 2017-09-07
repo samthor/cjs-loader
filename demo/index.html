@@ -16,7 +16,7 @@ load('./base64.js').then((base64) => {
 
 // nb. on the web, we have to refer to index.js directly: we can't get the path of the script after
 // it's executing (no redirects allowed)
-const packageToLoad = (window.location.hostname === 'locaxlhost' ?
+const packageToLoad = (window.location.hostname === 'localhost' ?
     'handlebars' : 'https://unpkg.com/handlebars@4.0.10/lib/index.js');
 
 load(packageToLoad).then((handlebars) => {
