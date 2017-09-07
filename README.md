@@ -1,57 +1,71 @@
-cjs-faker fakes commonJS and AMD boilerplate to allow importing legacy code via ES6 modules.
+cjs-loader transitively includes commonJS modules for use on the web.
+It does this using your browser and without a compile step.
+[Go here for a demo](https://samthor.github.io/cjs-loader/demo/index.html).
 
-This is implemented by providing fake `exports`/`module.exports`, `require()` and `define()` calls that are used by the commonJS or AMD code being included.
-You must shim _all_ modules that you depend on.
-
-# Rationale
-
-This approach is mostly a thought experiment in evaluating legacy code at runtime, rather than requiring a build step (as `require()` and `define()` are not supported natively by browsers).
-
-For most practical purposes, you'll be better off using Rollup with [its commonJS plugin](https://github.com/rollup/rollup-plugin-commonjs).
-Using Rollup requires a build step before you can import legacy code as an ES6 module, but doesn't require a shim per module in the dependency tree.
+🔥👨‍💻🔥 This is a successful but terrible idea and should not be used by anyone.
+It reqiures support for ES6 Modules 🛠️ and has only really been tested on Chrome 62+.
 
 # Usage
 
-Usage requires providing a shim around all commonJS or AMD modules:
+First, install modules you want to use with NPM or Yarn.
+These cannot use built-in Node modules, such as `fs` or `path`.
+Then, use the loader:
 
 ```js
-// wrap_base64.js
-import faker from './node_modules/cjs-faker/cjs-faker.js';
-import 'https://cdn.rawgit.com/mathiasbynens/base64/a8d7cabd/base64.js';
-export default faker('base64');
+import {load, setup} from './path/to/cjs-loader.js';
+setup('./path/to/cjs-loader.js');
+
+load('npm-package-name').then((out) => {
+  // do whatever as if you require()'d the package
+});
 ```
 
-Now you can just use the `base64` module inside ES6:
+To use Handlebars, for example:
 
 ```js
-import base64 from './wrap_base64.js';
-console.info(base64.encode('Hello!'));
+load('handlebars').then((handlebars) => {
+  const Handlebars = handlebars.create();
 
-// or use require() itself for already wrapped modules
-const base64 = require('base64');
+  const source = '<p>Hello {{name}}, you have {{name.length}} letters</p>';
+  const template = Handlebars.compile(source);
+  console.info(template({name: 'Sam'}));
+});
 ```
 
-No build steps are required.
+Handlebars internally fetches about ~35 modules (via `require()`), which we wrap.
 
-## Dependency Tree
+# Implementation
 
-If you depend on commonJS module A, which depends on commonJS module B etc, you must provide the shim for B first, then A.
-The default `faker` method in the examples fills a registry that is available via the global `require()` call, so B has to be shimmed first for A's `require('a')` call to succeed.
+1. Stub out `module.exports`, `require()` etc.
+2. Load the target module as an ES6 module^
+  * If a further dependency is unavailable in `require()`, throw a known exception
+  * Catch in a global handler, and load the dependency via step 2
+  * Retry running the target module when done
 
-See file B:
+^more or less
+
+[We also abuse](https://gist.github.com/samthor/8c5ebf3239bfeaca6c92299bb12b2a79) the fact that Chrome reruns but does _not_ need to reload script files with the same path, but a different hash.
+This allows for "efficient" retries.
+e.g.:
 
 ```js
-// wrap_b.js
-import faker from './node_modules/cjs-faker/cjs-faker.js';
-import './path/to/b.js';
-export default faker('b');
+import * as foo1 from './foo.js#1';
+import * as foo2 from './foo.js#2';
+foo1 !== foo2  // not the same, but only caused one network request
 ```
 
-And file A:
+# Notes
 
-```js
-// wrap_a.js
-import faker from './node_modules/cjs-faker/cjs-faker.js';
-import './path/to/a.js';
-export default faker('a');
-```
+## Caveats
+
+* Don't use this in production.
+  It's horrible.
+
+* Modules can't _really_ determine their path, so if one of your dependenies is from a 302 etc, all bets are off
+
+## TODOs
+
+* We should coalesce multiple failures to `require()` (just return `null` until an actual error occurs) and request further code in parallel
+
+* This code is forked from [cjs-faker](https://github.com/samthor/cjs-faker), and still supports AMD, but calling an unplanned `require()` from within `define()` doesn't work yet
+

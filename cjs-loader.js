@@ -26,6 +26,7 @@ const config = {
   global: window,
   location: window.location.href,  // take initial copy
   modules: 'node_modules',
+  path: null,
 };
 
 config.global.define = define;
@@ -174,35 +175,36 @@ export async function load(id) {
 let scriptCount = 0;  // used to force rerun, but _not_ reload
 
 function reload(id, url) {
-  // FIXME: config path to cjs-loader
-  const escapedUrl = url.replace(/'/g, '\\\'');
-  const escapedID = id.replace(/'/g, '\\\'');
+  if (!config.path) {
+    throw new Error('cjs-loader needs setup() called with its path')
+  }
+  const escape = (s) => s.replace(/'/g, '\\\'');
 
   // insert early script to setup scope
   utils.insertModuleScript(`
-import {setup} from '../cjs-loader.js';
-setup('${escapedID}', '${escapedUrl}');
+import {env} from '${escape(config.path)}';
+env('${escape(id)}', '${escape(url)}');
   `);
   // TODO: we can use above to create/teardown globals
 
   // insert actual script
   const script = utils.insertModuleScript(`
-import faker from '../cjs-loader.js';
-import '${escapedUrl}#${++scriptCount}';
-faker('${escapedID}');
+import {faker} from '../cjs-loader.js';
+import '${escape(url)}#${++scriptCount}';
+faker('${escape(id)}');
   `);
   script.onerror = cache[id].done;  // only for network/other errors
 }
 
 /**
  * @param {string} id
- * @return {string}
+ * @return {string} absolute path, including domain
  */
 function resolvePath(id) {
   try {
     // look for http://.. or similar
     const absolute = new URL(id);
-    return absolute.location;
+    return absolute.href;
   } catch (e) {
     // nothing, this is fine
   }
@@ -235,13 +237,13 @@ function resolvePath(id) {
 
   // poor man's normalize
   const u = new URL(pathname, config.location);
-  pathname = u.pathname.replace(/\/+/g, '/');
+  u.pathname = u.pathname.replace(/\/+/g, '/');
 
   // FIXME: ugly hack to assume .js, needed for Handlebars, will break .json loading
-  if (!pathname.endsWith('.js')) {
-    pathname += '.js';
+  if (!u.pathname.endsWith('.js')) {
+    u.pathname += '.js';
   }
-  return pathname;
+  return u.href;
 }
 
 /**
@@ -250,7 +252,7 @@ function resolvePath(id) {
  * @param {string} id
  * @param {string} url
  */
-export function setup(id, url) {
+export function env(id, url) {
   state = {id, url};
 }
 
@@ -258,7 +260,7 @@ export function setup(id, url) {
  * @param {string} id
  * @return {*} literally anything exported
  */
-function faker(id) {
+export function faker(id) {
   if (state.id !== id) {
     throw new Error(`invalid state.id=${state.id} id=${id}`);
   }
@@ -293,4 +295,9 @@ function faker(id) {
   }));
 }
 
-export default faker;
+/**
+ * @param {string} path to cjs-loader
+ */
+export function setup(path) {
+  config.path = path;
+}
