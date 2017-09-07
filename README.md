@@ -5,7 +5,7 @@ We do this using just your browser, without a compile step, by implementing `req
 For users of cjs-loader, we provide `load(moduleName)` that returns a `Promise` of the exports.
 
 🔥👨‍💻🔥 This is an interesting, successful but terrible idea and should not be used by anyone.
-It reqiures support for ES6 Modules 🛠️ and has only really been tested on Chrome 62+.
+It reqiures support for ES6 Modules 🛠️ and has only really been tested on Chrome 61+.
 
 # Usage
 
