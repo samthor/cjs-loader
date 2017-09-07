@@ -1,18 +1,18 @@
-cjs-faker fakes commonJS boilerplate to allow importing legacy code as an ES6 module.
+cjs-faker fakes commonJS and AMD boilerplate to allow importing legacy code via ES6 modules.
 
-This is implemented by providing fake `exports`/`module.exports` and `require()` calls that are used by the commonJS code being included.
-You must shim all commonJS modules that you depend on.
+This is implemented by providing fake `exports`/`module.exports`, `require()` and `define()` calls that are used by the commonJS or AMD code being included.
+You must shim _all_ modules that you depend on.
 
 # Rationale
 
-This approach is mostly a thought experiment in evaluating commonJS code at runtime, rather than requiring a build step (as `require()` is not supported natively by browsers).
+This approach is mostly a thought experiment in evaluating legacy code at runtime, rather than requiring a build step (as `require()` and `define()` are not supported natively by browsers).
 
 For most practical purposes, you'll be better off using Rollup with [its commonJS plugin](https://github.com/rollup/rollup-plugin-commonjs).
 Using Rollup requires a build step before you can import legacy code as an ES6 module, but doesn't require a shim per module in the dependency tree.
 
 # Usage
 
-Usage requires providing a shim around all commonJS modules:
+Usage requires providing a shim around all commonJS or AMD modules:
 
 ```js
 // wrap_base64.js
@@ -55,4 +55,3 @@ import faker from './node_modules/cjs-faker/cjs-faker.js';
 import './path/to/a.js';
 export default faker('a');
 ```
-
