@@ -136,7 +136,7 @@ function require(id) {
 function define(...args) {
   if (defined !== undefined) {
     // TODO: this could be supported (although we only know 'requester' ID)
-    throw new Error('cjs-faker had define() called multiple times')
+    throw new Error('cjs-loader had define() called multiple times')
   }
   defined = utils.argsForDefine(args);  // store for later
 }
@@ -174,20 +174,20 @@ export async function load(id) {
 let scriptCount = 0;  // used to force rerun, but _not_ reload
 
 function reload(id, url) {
-  // FIXME: config path to cjs-faker
+  // FIXME: config path to cjs-loader
   const escapedUrl = url.replace(/'/g, '\\\'');
   const escapedID = id.replace(/'/g, '\\\'');
 
   // insert early script to setup scope
   utils.insertModuleScript(`
-import {setup} from '../cjs-faker.js';
+import {setup} from '../cjs-loader.js';
 setup('${escapedID}', '${escapedUrl}');
   `);
   // TODO: we can use above to create/teardown globals
 
   // insert actual script
   const script = utils.insertModuleScript(`
-import faker from '../cjs-faker.js';
+import faker from '../cjs-loader.js';
 import '${escapedUrl}#${++scriptCount}';
 faker('${escapedID}');
   `);
