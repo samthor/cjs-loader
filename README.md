@@ -40,12 +40,14 @@ Handlebars internally fetches about ~35 modules (via `require()`), which we wrap
 # Implementation
 
 1. Stub out `module.exports`, `require()` etc.
-2. Load the target module as an ES6 module^
-  * If a further dependency is unavailable in `require()`, throw a known exception
+2. Load the target module as an ES6 module^1
+  * If a further dependency is unavailable in `require()`, throw a known exception^2
   * Catch in a global handler, and load the dependency via step 2
   * Retry running the target module when done
 
-^more or less
+^1 more or less
+
+^2 `require()` is synchronous, so we can't block to load more code
 
 ## Specific Hacks
 
@@ -69,6 +71,8 @@ Things that we can't fix:
   It's horrible.
 
 * Modules can't _really_ determine their path, so if one of your dependenies is from a 302 etc, all bets are off
+
+* Runtime `require()` (i.e., not run on initial import) calls will fail if the code isn't available
 
 ## TODOs
 
