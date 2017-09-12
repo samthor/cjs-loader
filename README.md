@@ -23,6 +23,8 @@ load('npm-package-name').then((out) => {
 </script>
 ```
 
+(This assumes `npm-package-name` is in the path `./node_modules/npm-package-name`. You can also `require()` a relative path.)
+
 For example, to use Handlebars ([as per the demo](https://samthor.github.io/cjs-loader/demo/index.html)):
 
 ```js
@@ -35,7 +37,7 @@ load('handlebars').then((handlebars) => {
 });
 ```
 
-Handlebars internally fetches about ~35 modules (via `require()`), which we wrap.
+Handlebars internally fetches about ~35 modules (via `require()`), which all get wrapped.
 
 # Implementation
 
