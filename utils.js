@@ -14,7 +14,8 @@
  * the License.
  */
 
-const functionMatch = /^function\s*\w*\(([\w\s,]+)\) {/;
+const functionMatch = /^(?:async\s*|)function\s*\*?\s*\w*\s*\(([\w\s,]+)\) {/;
+const arrowFunctionMatch = /^(?:async\s*|)(?:\(([\w\s,]+)\)|(\w+))\s+=>/;
 
 /**
  * Extracts the simple argument names from the passed function object. Returns an empty array if
@@ -24,11 +25,13 @@ const functionMatch = /^function\s*\w*\(([\w\s,]+)\) {/;
  * @return {!Array<string>} array of simple arg names (no =, ... etc)
  */
 function argNames(fn) {
-  const match = functionMatch.exec(fn.toString());
+  const s = fn.toString();
+  const match = functionMatch.exec(s) || arrowFunctionMatch.exec(s);
   if (!match) {
     return [];
   }
-  const args = match[1].split(',').map((x) => x.trim());
+  const raw = match[1] || match[2] || '';
+  const args = raw.split(',').map((x) => x.trim());
   if (args.length && args[args.length - 1] === '') {
     args.pop();
   }
