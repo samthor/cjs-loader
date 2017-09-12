@@ -1,5 +1,5 @@
 cjs-loader transitively includes commonJS modules for use on the web, and is useful for developers wanting to migrate to ES6 modules who still have legacy dependencies.
-[Go here for a demo](https://samthor.github.io/cjs-loader/demo/index.html).
+[Go here for a demo](https://samthor.github.io/cjs-loader/demo/index.html) (needs a browser with native modules support—Safari 10.1+, or Chrome 61+).
 
 We do this using just your browser, without a compile step, by implementing `require()` and other methods just while loading the module code.
 For users of cjs-loader, we provide `load(moduleName)` that returns a `Promise` of the exports.
